@@ -1,0 +1,10 @@
+[package]
+name = "xrec"
+version = "0.1.0"
+edition = "2021"
+description = "A cross-platform utility for creating and modifying firmware images"
+license = "MIT"
+
+[dependencies]
+sha2 = "0.10"
+sha3 = "0.10"
