@@ -70,6 +70,8 @@ mod tests {
             [0x11, 0x22, 0x33]
         );
         assert_eq!(vector("DEADBEEF", &vars).unwrap(), [0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(vector("[DE-AD-BE-EF]", &vars).unwrap(), [0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(vector("[DE;AD;BE;EF]", &vars).unwrap(), [0xDE, 0xAD, 0xBE, 0xEF]);
     }
 
     #[test]
@@ -145,5 +147,19 @@ mod tests {
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
         assert!(run(&args).is_ok());
+    }
+
+    #[test]
+    fn write_integer_suffixes_and_vector_alias_match_documentation() {
+        let args = vec![
+            "-wi".into(), "0".into(), "0x1234".into(), "u16".into(), "little".into(),
+            "-wv".into(), "0x100".into(), "[DEADBEEF]".into(),
+        ];
+        assert!(run(&args).is_ok());
+
+        let overflow = vec![
+            "-wi".into(), "0".into(), "256".into(), "u8".into(),
+        ];
+        assert!(run(&overflow).is_err());
     }
 }

@@ -359,7 +359,7 @@ Arguments:
 
 ### Write vector
 
-`-wv <addr> <vector> [overwrite]`
+`-wb <addr> <vector> [overwrite]`
 
 Write given bytes vector or vector variable value to given memory address.
 Arguments:
@@ -383,7 +383,7 @@ Print out all variables and their values.
 
 ### Integer
 
-All integers are signed 64-bit numbers inside xrec. Commands may restrict the value to be positive and limit the range of the value.
+All integers are signed 64-bit numbers inside xrec. Commands may restrict the value to be unsigned, positive or limit the range of the value.
 Integers can be written in decimal and hexadecimal format. Hexadecimal format can be used with "0x" prefix or "h" suffix.
 Integer arguments can be given as expressions made of integer and/or variable names and + or - operators. Expressions shall not contain spaces.
 

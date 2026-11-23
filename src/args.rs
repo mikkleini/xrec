@@ -98,6 +98,7 @@ pub(crate) fn command_name(s: &str) -> bool {
             | "-wt"
             | "-wi"
             | "-wb"
+            | "-wv"
             | "-pm"
             | "-pv"
     )

@@ -144,23 +144,23 @@ pub(crate) fn vector(input: &str, vars: &HashMap<String, Value>) -> Result<Vec<u
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(input);
-    let segments: Vec<&str> = inner.split(',').collect();
+    let without_prefixes = inner.replace("0x", "").replace("0X", "");
+    let normalized: String = without_prefixes
+        .chars()
+        .filter(|c| !matches!(c, ',' | ':' | ';' | '-' | ' ' | '\t'))
+        .collect();
     let mut bytes = Vec::new();
-    for segment in segments {
-        let segment: String = segment.chars().filter(|c| !c.is_whitespace()).collect();
-        let segment = segment
-            .strip_prefix("0x")
-            .or_else(|| segment.strip_prefix("0X"))
-            .unwrap_or(&segment);
-        if segment.is_empty() || !segment.len().is_multiple_of(2) || !segment.is_ascii() {
-            return Err("vector must contain 1-64 bytes written as hexadecimal".into());
-        }
-        for i in (0..segment.len()).step_by(2) {
-            bytes.push(
-                u8::from_str_radix(&segment[i..i + 2], 16)
-                    .map_err(|_| "invalid vector byte".to_string())?,
-            );
-        }
+    if normalized.is_empty()
+        || !normalized.len().is_multiple_of(2)
+        || !normalized.is_ascii()
+    {
+        return Err("vector must contain 1-64 bytes written as hexadecimal".into());
+    }
+    for i in (0..normalized.len()).step_by(2) {
+        bytes.push(
+            u8::from_str_radix(&normalized[i..i + 2], 16)
+                .map_err(|_| "invalid vector byte".to_string())?,
+        );
     }
     if bytes.len() > 64 {
         return Err("vector may contain at most 64 bytes".into());
@@ -175,7 +175,33 @@ pub(crate) fn text_value(
     match vars.get(input) {
         Some(Value::Text { content, format }) => Ok((content.clone(), Some(format.clone()))),
         Some(_) => Err(format!("variable {input} is not text")),
-        None => Ok((input.to_string(), None)),
+        None => {
+            let text = if input.len() >= 2 && input.starts_with('"') && input.ends_with('"') {
+                &input[1..input.len() - 1]
+            } else {
+                input
+            };
+            let mut result = String::new();
+            let mut chars = text.chars();
+            while let Some(ch) = chars.next() {
+                if ch == '\\' {
+                    match chars.next() {
+                        Some('"') => result.push('"'),
+                        Some('n') => result.push('\n'),
+                        Some('r') => result.push('\r'),
+                        Some('\\') => result.push('\\'),
+                        Some(other) => {
+                            result.push('\\');
+                            result.push(other);
+                        }
+                        None => result.push('\\'),
+                    }
+                } else {
+                    result.push(ch);
+                }
+            }
+            Ok((result, None))
+        }
     }
 }
 

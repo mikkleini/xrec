@@ -12,6 +12,9 @@ pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context) -> Result<()>
     }
     let name = args.required()?;
     variable_name(&name)?;
+    if context.vars.contains_key(&name) {
+        return Err(format!("variable already exists: {name}"));
+    }
     let data = context.memory.read(start, len)?;
     let mask = if bits == 64 {
         u64::MAX

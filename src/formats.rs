@@ -7,11 +7,14 @@ use crate::Result;
 pub(crate) type Record = (u64, Vec<u8>);
 type LoadedRecords = (Vec<Record>, Option<u64>);
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Format {
     Bin,
     Ihex,
     Srec,
+    S19,
+    S28,
+    S37,
     Thex,
 }
 
@@ -21,44 +24,54 @@ impl Format {
             "bin" => Ok(Self::Bin),
             "ihex" => Ok(Self::Ihex),
             "srec" => Ok(Self::Srec),
+            "s19" => Ok(Self::S19),
+            "s28" => Ok(Self::S28),
+            "s37" => Ok(Self::S37),
             "thex" => Ok(Self::Thex),
             _ => Err(format!("unsupported file format: {s}")),
         }
     }
 }
 
-pub(crate) fn read_file(path: &str) -> Result<(Format, Vec<Record>, Option<u64>)> {
+pub(crate) fn read_file_as(
+    path: &str,
+    forced: Option<Format>,
+) -> Result<(Format, Vec<Record>, Option<u64>)> {
     let data = fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?;
     let text = String::from_utf8_lossy(&data);
-    let trimmed = text.trim_start();
-    let extension = Path::new(path)
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let format = if extension == "bin" {
-        Format::Bin
-    } else if trimmed.starts_with(':') || extension == "hex" || extension == "ihex" {
-        Format::Ihex
-    } else if trimmed.starts_with('S')
-        || extension == "srec"
-        || extension == "s19"
-        || extension == "mot"
-    {
-        Format::Srec
-    } else if trimmed.starts_with('/')
-        || trimmed.starts_with('%')
-        || extension == "thex"
-        || extension == "tek"
-    {
-        Format::Thex
-    } else {
-        Format::Bin
-    };
+    let format = forced.unwrap_or_else(|| {
+        let trimmed = text.trim_start();
+        let extension = Path::new(path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if extension == "bin" {
+            Format::Bin
+        } else if trimmed.starts_with(':') || extension == "hex" || extension == "ihex" {
+            Format::Ihex
+        } else if trimmed.starts_with('S')
+            || extension == "srec"
+            || extension == "s19"
+            || extension == "mot"
+        {
+            Format::Srec
+        } else if trimmed.starts_with('/')
+            || trimmed.starts_with('%')
+            || extension == "thex"
+            || extension == "tek"
+        {
+            Format::Thex
+        } else {
+            Format::Bin
+        }
+    });
     match format {
         Format::Bin => Ok((format, vec![(0, data)], None)),
         Format::Ihex => load_ihex(&text).map(|(r, s)| (format, r, s)),
-        Format::Srec => load_srec(&text).map(|(r, s)| (format, r, s)),
+        Format::Srec | Format::S19 | Format::S28 | Format::S37 => {
+            load_srec(&text).map(|(r, s)| (format, r, s))
+        }
         Format::Thex => load_thex(&text).map(|r| (format, r, None)),
     }
 }
@@ -67,6 +80,7 @@ pub(crate) fn save_file(
     path: &str,
     format: Format,
     memory: &Memory,
+    blanks: u8,
     offset: u64,
     start: u64,
 ) -> Result<()> {
@@ -86,10 +100,15 @@ pub(crate) fn save_file(
             if offset < first || offset > last {
                 return Err("binary output offset is outside the memory space".into());
             }
-            memory.read(offset, last - offset + 1)?
+            (offset..=last)
+                .map(|address| memory.bytes.get(&address).copied().unwrap_or(blanks))
+                .collect()
         }
         Format::Ihex => save_ihex(memory)?.into_bytes(),
-        Format::Srec => save_srec(memory, start)?.into_bytes(),
+        Format::Srec => save_srec(memory, start, None)?.into_bytes(),
+        Format::S19 => save_srec(memory, start, Some(2))?.into_bytes(),
+        Format::S28 => save_srec(memory, start, Some(3))?.into_bytes(),
+        Format::S37 => save_srec(memory, start, Some(4))?.into_bytes(),
         Format::Thex => save_thex(memory)?.into_bytes(),
     };
     fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"))
@@ -385,7 +404,7 @@ fn ihex_record(address: u16, kind: u8, data: &[u8]) -> String {
     )
 }
 
-fn save_srec(memory: &Memory, start: u64) -> Result<String> {
+fn save_srec(memory: &Memory, start: u64, forced_address_len: Option<usize>) -> Result<String> {
     let max = memory
         .bytes
         .keys()
@@ -396,13 +415,21 @@ fn save_srec(memory: &Memory, start: u64) -> Result<String> {
     if max > u32::MAX as u64 {
         return Err("Motorola S-record supports only 32-bit addresses".into());
     }
-    let (data_kind, address_len, term_kind) = if max <= 0xFFFF {
-        ('1', 2, '9')
-    } else if max <= 0xFF_FFFF {
-        ('2', 3, '8')
-    } else {
-        ('3', 4, '7')
+    let (data_kind, address_len, term_kind) = match forced_address_len {
+        Some(2) => ('1', 2, '9'),
+        Some(3) => ('2', 3, '8'),
+        Some(4) => ('3', 4, '7'),
+        Some(_) => return Err("invalid Motorola S-record address size".into()),
+        None if max <= 0xFFFF => ('1', 2, '9'),
+        None if max <= 0xFF_FFFF => ('2', 3, '8'),
+        None => ('3', 4, '7'),
     };
+    if address_len == 2 && max > 0xFFFF {
+        return Err("memory or start address exceeds S19 16-bit address range".into());
+    }
+    if address_len == 3 && max > 0xFF_FFFF {
+        return Err("memory or start address exceeds S28 24-bit address range".into());
+    }
     let mut out = srec_line('0', 0, 2, b"");
     let mut iter = memory.bytes.iter().peekable();
     while let Some((&address, _)) = iter.peek().copied() {
@@ -496,10 +523,17 @@ mod tests {
         memory
             .insert(0x1_2345, &[0xDE, 0xAD, 0xBE, 0xEF], false)
             .unwrap();
-        let text = save_srec(&memory, 0x1_2345).unwrap();
+        let text = save_srec(&memory, 0x1_2345, None).unwrap();
         let (records, start) = load_srec(&text).unwrap();
         assert_eq!(start, Some(0x1_2345));
         assert_eq!(records, vec![(0x1_2345, vec![0xDE, 0xAD, 0xBE, 0xEF])]);
+    }
+
+    #[test]
+    fn format_parser_supports_documented_s_record_styles() {
+        assert_eq!(Format::parse("s19").unwrap(), Format::S19);
+        assert_eq!(Format::parse("s28").unwrap(), Format::S28);
+        assert_eq!(Format::parse("s37").unwrap(), Format::S37);
     }
 
     #[test]

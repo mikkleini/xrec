@@ -65,7 +65,7 @@ pub(crate) fn dispatch(
         "-sha3" => sha3::run(args, context),
         "-wt" => write_text::run(args, context),
         "-wi" => write_integer::run(args, context),
-        "-wb" => write_vector::run(args, context),
+        "-wb" | "-wv" => write_vector::run(args, context),
         "-pm" => print_memory::run(context),
         "-pv" => print_variables::run(context),
         _ => Err(format!("unsupported command: {command}")),

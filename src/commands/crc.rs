@@ -30,6 +30,9 @@ pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context, width: u32) -
     }
     let name = args.required()?;
     variable_name(&name)?;
+    if context.vars.contains_key(&name) {
+        return Err(format!("variable already exists: {name}"));
+    }
     let limit = (1u64 << width) - 1;
     if poly > limit || init > limit || xor_out > limit {
         return Err(format!("CRC parameters must fit in {width} bits"));

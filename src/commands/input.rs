@@ -1,11 +1,30 @@
 use crate::args::{command_name, Arguments};
 use crate::context::Context;
-use crate::formats::read_file;
+use crate::formats::{read_file_as, Format};
 use crate::value::expression;
 use crate::Result;
 
 pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context) -> Result<()> {
     let path = args.required()?;
+    let forced = if args
+        .peek()
+        .map(|s| {
+            matches!(
+                s.to_ascii_lowercase().as_str(),
+                "auto" | "bin" | "ihex" | "srec" | "s19" | "s28" | "s37" | "thex"
+            )
+        })
+        .unwrap_or(false)
+    {
+        let type_name = args.required()?.to_ascii_lowercase();
+        if type_name == "auto" {
+            None
+        } else {
+            Some(Format::parse(&type_name)?)
+        }
+    } else {
+        None
+    };
     let offset = if args
         .peek()
         .map(|s| {
@@ -18,7 +37,7 @@ pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context) -> Result<()>
         0
     };
     let overwrite = args.consume_flag(&["ow", "overwrite"]);
-    let (_, records, file_start) = read_file(&path)?;
+    let (_, records, file_start) = read_file_as(&path, forced)?;
     context.memory.insert_records(&records, offset, overwrite)?;
     if let Some(address) = file_start {
         context.start_address = address
