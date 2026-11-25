@@ -15,6 +15,8 @@ pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context) -> Result<()>
             .any(|candidate| option.eq_ignore_ascii_case(candidate))
         {
             format = Some(args.required()?);
+        } else if option == "-" {
+            args.advance();
         } else if args.consume_flag(&["nt", "nullterm"]) {
             nullterm = true;
         } else if args.consume_flag(&["ow", "overwrite"]) {

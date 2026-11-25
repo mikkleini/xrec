@@ -150,10 +150,7 @@ pub(crate) fn vector(input: &str, vars: &HashMap<String, Value>) -> Result<Vec<u
         .filter(|c| !matches!(c, ',' | ':' | ';' | '-' | ' ' | '\t'))
         .collect();
     let mut bytes = Vec::new();
-    if normalized.is_empty()
-        || !normalized.len().is_multiple_of(2)
-        || !normalized.is_ascii()
-    {
+    if normalized.is_empty() || !normalized.len().is_multiple_of(2) || !normalized.is_ascii() {
         return Err("vector must contain 1-64 bytes written as hexadecimal".into());
     }
     for i in (0..normalized.len()).step_by(2) {

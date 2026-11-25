@@ -9,15 +9,16 @@ pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context) -> Result<()>
     let forced = if args
         .peek()
         .map(|s| {
-            matches!(
-                s.to_ascii_lowercase().as_str(),
-                "auto" | "bin" | "ihex" | "srec" | "s19" | "s28" | "s37" | "thex"
-            )
+            s == "-"
+                || matches!(
+                    s.to_ascii_lowercase().as_str(),
+                    "auto" | "bin" | "ihex" | "srec" | "s19" | "s28" | "s37" | "thex"
+                )
         })
         .unwrap_or(false)
     {
         let type_name = args.required()?.to_ascii_lowercase();
-        if type_name == "auto" {
+        if type_name == "auto" || type_name == "-" {
             None
         } else {
             Some(Format::parse(&type_name)?)
@@ -32,7 +33,12 @@ pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context) -> Result<()>
         })
         .unwrap_or(false)
     {
-        expression(&args.required()?, &context.vars)?
+        let value = args.required()?;
+        if value == "-" {
+            0
+        } else {
+            expression(&value, &context.vars)?
+        }
     } else {
         0
     };

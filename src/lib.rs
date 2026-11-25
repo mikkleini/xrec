@@ -70,8 +70,14 @@ mod tests {
             [0x11, 0x22, 0x33]
         );
         assert_eq!(vector("DEADBEEF", &vars).unwrap(), [0xDE, 0xAD, 0xBE, 0xEF]);
-        assert_eq!(vector("[DE-AD-BE-EF]", &vars).unwrap(), [0xDE, 0xAD, 0xBE, 0xEF]);
-        assert_eq!(vector("[DE;AD;BE;EF]", &vars).unwrap(), [0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(
+            vector("[DE-AD-BE-EF]", &vars).unwrap(),
+            [0xDE, 0xAD, 0xBE, 0xEF]
+        );
+        assert_eq!(
+            vector("[DE;AD;BE;EF]", &vars).unwrap(),
+            [0xDE, 0xAD, 0xBE, 0xEF]
+        );
     }
 
     #[test]
@@ -152,14 +158,61 @@ mod tests {
     #[test]
     fn write_integer_suffixes_and_vector_alias_match_documentation() {
         let args = vec![
-            "-wi".into(), "0".into(), "0x1234".into(), "u16".into(), "little".into(),
-            "-wv".into(), "0x100".into(), "[DEADBEEF]".into(),
+            "-wi".into(),
+            "0".into(),
+            "0x1234".into(),
+            "u16".into(),
+            "little".into(),
+            "-wv".into(),
+            "0x100".into(),
+            "[DEADBEEF]".into(),
         ];
         assert!(run(&args).is_ok());
 
-        let overflow = vec![
-            "-wi".into(), "0".into(), "256".into(), "u8".into(),
-        ];
+        let overflow = vec!["-wi".into(), "0".into(), "256".into(), "u8".into()];
         assert!(run(&overflow).is_err());
+    }
+
+    #[test]
+    fn vector_find_and_sliced_export_work_through_command_dispatch() {
+        let output =
+            std::env::temp_dir().join(format!("xrec-export-find-{}.bin", std::process::id()));
+        let output_from_default =
+            std::env::temp_dir().join(format!("xrec-export-default-{}.bin", std::process::id()));
+        let path = output.to_str().unwrap();
+        let default_path = output_from_default.to_str().unwrap();
+        let args = [
+            "-s",
+            "-f",
+            "0",
+            "4",
+            "[AA BB]",
+            "-fv",
+            "0",
+            "4",
+            "-1",
+            "[AA BB]",
+            "FOUND",
+            "-o",
+            path,
+            "bin",
+            "-",
+            "FOUND",
+            "ow",
+            "-o",
+            default_path,
+            "bin",
+            "FOUND",
+            "-",
+            "ow",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>();
+        run(&args).unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), [0xAA, 0xBB]);
+        assert_eq!(std::fs::read(&output_from_default).unwrap(), [0xAA, 0xBB]);
+        std::fs::remove_file(output).unwrap();
+        std::fs::remove_file(output_from_default).unwrap();
     }
 }

@@ -8,6 +8,7 @@ mod crc32;
 mod crc8;
 mod erase;
 mod fill;
+mod find_vector;
 mod help;
 mod input;
 mod move_memory;
@@ -52,6 +53,7 @@ pub(crate) fn dispatch(
         "-e" => erase::run(args, context),
         "-tb" => trim_begin::run(args, context),
         "-te" => trim_end::run(args, context),
+        "-fv" => find_vector::run(args, context),
         "-c" => copy::run(args, context),
         "-m" => move_memory::run(args, context),
         "-st" => set_text::run(args, context),
@@ -65,7 +67,7 @@ pub(crate) fn dispatch(
         "-sha3" => sha3::run(args, context),
         "-wt" => write_text::run(args, context),
         "-wi" => write_integer::run(args, context),
-        "-wb" | "-wv" => write_vector::run(args, context),
+        "-wv" => write_vector::run(args, context),
         "-pm" => print_memory::run(context),
         "-pv" => print_variables::run(context),
         _ => Err(format!("unsupported command: {command}")),

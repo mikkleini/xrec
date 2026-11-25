@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use crate::memory::Memory;
@@ -80,38 +81,94 @@ pub(crate) fn save_file(
     path: &str,
     format: Format,
     memory: &Memory,
-    blanks: u8,
-    offset: u64,
+    address: u64,
+    len: Option<u64>,
     start: u64,
+    overwrite: bool,
 ) -> Result<()> {
-    let bytes = match format {
-        Format::Bin => {
-            let (&first, _) = memory
-                .bytes
-                .iter()
-                .next()
-                .ok_or("cannot write an empty memory space")?;
-            let (&last, _) = memory
-                .bytes
-                .iter()
-                .next_back()
-                .ok_or("cannot write an empty memory space")?;
-            let offset = if offset == 0 { first } else { offset };
-            if offset < first || offset > last {
-                return Err("binary output offset is outside the memory space".into());
-            }
-            (offset..=last)
-                .map(|address| memory.bytes.get(&address).copied().unwrap_or(blanks))
-                .collect()
-        }
-        Format::Ihex => save_ihex(memory)?.into_bytes(),
-        Format::Srec => save_srec(memory, start, None)?.into_bytes(),
-        Format::S19 => save_srec(memory, start, Some(2))?.into_bytes(),
-        Format::S28 => save_srec(memory, start, Some(3))?.into_bytes(),
-        Format::S37 => save_srec(memory, start, Some(4))?.into_bytes(),
-        Format::Thex => save_thex(memory)?.into_bytes(),
+    let bytes = encode_file(format, memory, address, len, start)?;
+    if overwrite {
+        fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"))
+    } else {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| format!("cannot create {path}: {e}"))?;
+        file.write_all(&bytes)
+            .map_err(|e| format!("cannot write {path}: {e}"))
+    }
+}
+
+fn encode_file(
+    format: Format,
+    memory: &Memory,
+    address: u64,
+    len: Option<u64>,
+    start: u64,
+) -> Result<Vec<u8>> {
+    let (&last, _) = memory
+        .bytes
+        .iter()
+        .next_back()
+        .ok_or("cannot write an empty memory space")?;
+    let end = match len {
+        Some(len) => Memory::end(address, len)?,
+        None => last
+            .checked_add(1)
+            .ok_or("output address range overflows u64")?,
     };
-    fs::write(path, bytes).map_err(|e| format!("cannot write {path}: {e}"))
+    if end <= address {
+        return Err("output length must be greater than zero".into());
+    }
+
+    let sliced = Memory {
+        bytes: memory
+            .bytes
+            .range(address..end)
+            .map(|(address, byte)| (*address, *byte))
+            .collect(),
+    };
+    let bytes = match format {
+        Format::Bin => memory.read(address, end - address)?,
+        Format::Ihex => {
+            if sliced.bytes.is_empty() {
+                return Err("no memory data in output range".into());
+            }
+            save_ihex(&sliced)?.into_bytes()
+        }
+        Format::Srec => {
+            if sliced.bytes.is_empty() {
+                return Err("no memory data in output range".into());
+            }
+            save_srec(&sliced, start, None)?.into_bytes()
+        }
+        Format::S19 => {
+            if sliced.bytes.is_empty() {
+                return Err("no memory data in output range".into());
+            }
+            save_srec(&sliced, start, Some(2))?.into_bytes()
+        }
+        Format::S28 => {
+            if sliced.bytes.is_empty() {
+                return Err("no memory data in output range".into());
+            }
+            save_srec(&sliced, start, Some(3))?.into_bytes()
+        }
+        Format::S37 => {
+            if sliced.bytes.is_empty() {
+                return Err("no memory data in output range".into());
+            }
+            save_srec(&sliced, start, Some(4))?.into_bytes()
+        }
+        Format::Thex => {
+            if sliced.bytes.is_empty() {
+                return Err("no memory data in output range".into());
+            }
+            save_thex(&sliced)?.into_bytes()
+        }
+    };
+    Ok(bytes)
 }
 
 fn checksum_ihex(bytes: &[u8]) -> u8 {
@@ -534,6 +591,58 @@ mod tests {
         assert_eq!(Format::parse("s19").unwrap(), Format::S19);
         assert_eq!(Format::parse("s28").unwrap(), Format::S28);
         assert_eq!(Format::parse("s37").unwrap(), Format::S37);
+    }
+
+    #[test]
+    fn binary_export_rejects_gaps_and_respects_slice() {
+        let mut memory = Memory::default();
+        memory.insert(0x100, &[0xAA, 0xBB], false).unwrap();
+        memory.insert(0x104, &[0xCC], false).unwrap();
+        assert!(encode_file(Format::Bin, &memory, 0x101, Some(4), 0).is_err());
+
+        let mut contiguous = Memory::default();
+        contiguous
+            .insert(0x100, &[0xAA, 0xBB, 0xCC, 0xDD, 0xEE], false)
+            .unwrap();
+        assert_eq!(
+            encode_file(Format::Bin, &contiguous, 0x101, Some(3), 0).unwrap(),
+            [0xBB, 0xCC, 0xDD]
+        );
+    }
+
+    #[test]
+    fn binary_export_defaults_to_address_zero() {
+        let mut memory = Memory::default();
+        memory.insert(0, &[0xAA, 0xBB], false).unwrap();
+        assert_eq!(
+            encode_file(Format::Bin, &memory, 0, None, 0).unwrap(),
+            [0xAA, 0xBB]
+        );
+    }
+
+    #[test]
+    fn non_binary_export_contains_only_requested_slice() {
+        let mut memory = Memory::default();
+        memory.insert(0x100, &[0xAA, 0xBB], false).unwrap();
+        memory.insert(0x200, &[0xCC], false).unwrap();
+        let ihex =
+            String::from_utf8(encode_file(Format::Ihex, &memory, 0x101, Some(1), 0).unwrap())
+                .unwrap();
+        assert_eq!(load_ihex(&ihex).unwrap().0, vec![(0x101, vec![0xBB])]);
+    }
+
+    #[test]
+    fn export_requires_overwrite_flag_for_existing_file() {
+        let path = std::env::temp_dir().join(format!("xrec-overwrite-{}.bin", std::process::id()));
+        fs::write(&path, [0xFF]).unwrap();
+        let path = path.to_str().unwrap();
+        let mut memory = Memory::default();
+        memory.insert(0, &[0xAA], false).unwrap();
+
+        assert!(save_file(path, Format::Bin, &memory, 0, None, 0, false).is_err());
+        save_file(path, Format::Bin, &memory, 0, None, 0, true).unwrap();
+        assert_eq!(fs::read(path).unwrap(), [0xAA]);
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

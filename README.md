@@ -2,7 +2,7 @@
 
 Xrec is a cross-platform command line utility to create, convert and modify binary, Intel Hex, Tektronix Hex and Motorola S-record files. Its primary use case is embedded firmware development. It can perform multiple operations in single execution. For example, it can merge multiple files, relocate them to the dedicated addresses, write headers and footers, calculate checksum and then save it all down into single or multiple files.
 
-Xrec is written in Rust largely by AI tools, because I never had time to write it on my own. So I rather wrote complete usage specification and let the AI do the dirty work.
+Xrec is written in Rust largely by AI tools (Copilot + various models), because I never had time to complete this idea. So I rather write usage specification and let the AI do the dirty work.
 
 # Xrec usage
 
@@ -19,7 +19,7 @@ Arguments convention:
   * <> is mandatory argument
   * [] is optional argument with possible default value after =
 
-If optional argument is given, all preceding optional arguments shall be given.
+If optional arguments are given, then all preceding optional arguments shall be given or left to default by using dash "-". It means if user only cares about the last optional argument, then previous ones shall be given as dashes.
   
 ## Supported file types
 
@@ -38,16 +38,17 @@ Import and export commands support following file types:
 | [Version](#version)             | `-v`                                                           |
 | [Silent](#silent)               | `-s`                                                           |
 | [Import file](#import-file)     | `-i <file> [type=auto] [offset=0] [overwrite]`                 |
-| [Export file](#export-file)     | `-o <file> <type> [blanks=0] [offset=0]`                       |
+| [Export file](#export-file)     | `-o <file> <type> [addr=0] [len] [overwrite]`                  |
 | [Start address](#start-address) | `-sa <addr>`                                                   |
 | [Check empty](#check-empty)     | `-ce <addr> <len>`                                             |
 | [Check gaps](#check-gaps)       | `-cg <addr> <len>`                                             |
 | [Fill](#fill)                   | `-f <addr> <len> <vector> [overwrite]`                         |
 | [Erase](#erase)                 | `-e <addr> <len>`                                              |
-| [Trim begin](#trim-begin)       | `-tb <addr> <len> <byte> [align=1]`                            |
-| [Trim end](#trim-end)           | `-te <addr> <len> <byte> [align=1]`                            |
 | [Copy](#copy)                   | `-c <addr> <len> <dest> [overwrite]`                           |
 | [Move](#move)                   | `-m <addr> <len> <dest> [overwrite]`                           |
+| [Trim begin](#trim-begin)       | `-tb <addr> <len> <byte> [align=1]`                            |
+| [Trim end](#trim-end)           | `-te <addr> <len> <byte> [align=1]`                            |
+| [Find vector](#find-vector)     | `-fv <addr> <len> <dir> <vector> <var>`                        |
 | [Set text](#set-text)           | `-st <var> <text> [format=ascii]`                              |
 | [Set integer](#set-integer)     | `-si <var> <int>`                                              |
 | [Set vector](#set-vector)       | `-sv <var> <vector>`                                           |
@@ -59,7 +60,7 @@ Import and export commands support following file types:
 | [SHA-3](#sha-3)                 | `-sha3 <addr> <len> <bits> <var>`                              |
 | [Write text](#write-text)       | `-wt <addr> <text> [format=ascii] [nullterm] [overwrite]`      |
 | [Write integer](#write-integer) | `-wi <addr> <int> <bits> <endianness> [overwrite]`             |
-| [Write vector](#write-vector)   | `-wb <addr> <vector> [overwrite]`                              |
+| [Write vector](#write-vector)   | `-wv <addr> <vector> [overwrite]`                              |
 | [Print memory](#print-memory)   | `-pm`                                                          |
 | [Print vars](#print-vars)       | `-pv`                                                          |
 
@@ -102,9 +103,11 @@ Arguments:
 
 ### Export file
 
-`-o <file> <type> [blanks=0] [offset=0]`                          
+`-o <file> <type> [addr=0] [len] [overwrite]`                          
 
 Exports memory into file. Memory content remains intact after export. Memory can be exported in multiple formats.
+By using *addr* and *len* arguments, it is possible to slice the memory content into multiple files.
+If the file exists, the command fails unless the *overwrite* flag is given.
 Arguments:
 
   * *file* is relative or absolute path of the exported file.
@@ -116,8 +119,14 @@ Arguments:
     * *s28* to save as Motorola S-record with 24-bit addresses.
     * *s37* to save as Motorola S-record with 32-bit addresses.
     * *thex* to save as Tektronix Hex.
-  * *blanks* is optional argument for binary file type used to fill memory gaps. Blanks date type is [integer](#integer) in 0-255 range. Usually it is either 0x00 or 0xFF.
-  * *offset* is optional argument for binary file type to start saving from given offset. E.g. when data starts at 0x100000 then it is possible to skip saving 1MB of blank data by giving 0x100000 offset. Offset data type is unsigned [integer](#integer).
+  * *addr* is optional unsigned [integer](#integer) argument that specifies the start address of the area to export.
+  * *len* is optional unsigned [integer](#integer) argument that specifies the length of memory area to save. If argument is not given, then all data after *addr* is exported.
+  * *overwrite* or *ow* is optional flag to give to overwrite potentially existing file.
+
+Details:
+  * When exporting into binary file and memory space has gaps (e.g. if it was imported) then command fails because binary file does not have address info. Use [fill](#fill) command prior to binary export to fill the blanks (usually with 0xFF's).
+  * When data (e.g. firmware) starts at high offset (e.g. 0x100000) and it is exported into binary file, then use *addr* (e.g. value 0x100000) to skip saving a lot of dummy bytes.
+  * When exporting into addressable file type (hex, srec, etc.) and area is specified with *addr* and optionally with *len* argument, then only the existing data within given area is exported. No gaps fill is required.
 
 ### Start address
 
@@ -150,11 +159,24 @@ Arguments:
 `-f <addr> <len> <vector> [overwrite]`
 
 Fill given memory area with byte vector. Can used to fill with single byte or a pattern. Pattern is aligned to start address and vector length even if single byte gaps are filled.
+With overwrite flag it is possible to completely wipe out existing data or only fill the gaps.
 Arguments:
   * *addr* is start address of the area as unsigned [integer](#integer).
   * *len* is length of the area in bytes as positive [integer](#integer).
   * *vector* is fill pattern as byte(s) [vector](#vector).
-  * *overwrite* or *ow* flag can be set to overwrite any existing memory. If overwrite flag is not given, fills only the blank spaces.
+  * *overwrite* or *ow* flag can be set to overwrite existing memory. If overwrite flag is not given, command fills only the gaps within the area.
+
+Example of pattern fill:
+
+Assume there is a memory space with few gaps (..):
+
+`00 11 22 .. .. 55 66 77
+88 99 AA BB CC DD .. FF`
+
+When filling with 2-byte vector [BEEF] at address 4 without overwriting, the result is:
+
+`00 11 22 .. BE 55 66 77
+88 99 AA BB CC EF BE FF`
 
 ### Erase
 
@@ -164,6 +186,28 @@ Erases defined memory area.
 Arguments:
   * *addr* is start address of the area as unsigned [integer](#integer).
   * *len* is length of the area in bytes as positive [integer](#integer).
+
+### Copy
+
+`-c <addr> <len> <dest> [overwrite]`
+
+Copies defined memory area to given destination address. Destination cannot overlap with source area.
+Arguments:
+  * *addr* is start address of the source area as unsigned [integer](#integer).
+  * *len* is length of the area in bytes as positive [integer](#integer).
+  * *dest* is destination start address as unsigned [integer](#integer).
+  * *overwrite* or *ow* flag can be set to overwrite any existing memory at the destination. If overwrite flag is not set and the destination content overlaps with existing memory content, then error is given.
+
+### Move
+
+`-m <addr> <len> <dest> [overwrite]`
+
+Moves defined memory area to given destination address. Destination can be within source area.
+Arguments:
+  * *addr* is start address of the source area as unsigned [integer](#integer).
+  * *len* is length of the area in bytes as positive [integer](#integer).
+  * *dest* is destination start address as unsigned [integer](#integer).
+  * *overwrite* or *ow* flag can be set to overwrite any existing memory at the destination. If overwrite flag is not set and the destination content overlaps with existing memory content outside of the moved area, then error is given.
 
 ### Trim begin
 
@@ -206,27 +250,18 @@ Arguments:
   * *byte* is the byte value to trim away as [integer](#integer) in 0-255 range.
   * *align* is optional alignment to maintain while trimming. Alignment is given as positive [integer](#integer).
 
-### Copy
+### Find vector
 
-`-c <addr> <len> <dest> [overwrite]`
+`-fv <addr> <len> <dir> <vector> <var>`
 
-Copies defined memory area to given destination address. Destination cannot overlap with source area.
+Finds starting address of first specified [vector](#vector) within area and stores it in the [integer](#integer) variable.
+Once first match is found, function completes. If vector is not found, command fails.
 Arguments:
-  * *addr* is start address of the source area as unsigned [integer](#integer).
-  * *len* is length of the area in bytes as positive [integer](#integer).
-  * *dest* is destination start address as unsigned [integer](#integer).
-  * *overwrite* or *ow* flag can be set to overwrite any existing memory at the destination. If overwrite flag is not set and the destination content overlaps with existing memory content, then error is given.
-
-### Move
-
-`-m <addr> <len> <dest> [overwrite]`
-
-Moves defined memory area to given destination address. Destination can be within source area.
-Arguments:
-  * *addr* is start address of the source area as unsigned [integer](#integer).
-  * *len* is length of the area in bytes as positive [integer](#integer).
-  * *dest* is destination start address as unsigned [integer](#integer).
-  * *overwrite* or *ow* flag can be set to overwrite any existing memory at the destination. If overwrite flag is not set and the destination content overlaps with existing memory content outside of the moved area, then error is given.
+  * *addr* is search area start address of the area as unsigned [integer](#integer).
+  * *len* is length of the search area in bytes as positive [integer](#integer).
+  * *dir* is search direction. 1 means from start to end, -1 means from end to start, other values are invalid.
+  * *vector* is [vector](#vector) to search for.
+  * *var* is name of the variable where to store the found vector address as [integer](#integer). If variable exists, command fails.
 
 ### Set text
 
@@ -259,11 +294,11 @@ Arguments:
 
 `-csum <addr> <len> <bits> <var>`
 
-Calculate simple checksum of defined memory area and set the value to variable. bits defines the value size. Sum can overflow (wraps around). Any gap in the memory area will fail the operation.
+Calculate simple checksum of defined memory area and set the value to variable. bits defines the value size. Sum can overflow (wraps around) when maximum value is reached. Any gap in the memory area will fail the operation.
 Arguments:
   * *addr* is start address of the area as unsigned [integer](#integer).
   * *len* is length of the area in bytes as positive [integer](#integer).
-  * *bits* is the result size in bits: 8, 16, 32 or 64.
+  * *bits* is the result size in bits: 8, 16, 24, 32, 40, 48, 56 or 64.
   * *var* is name of the variable the result is stored into. If variable already exists, command will fail.
 
 ### CRC-8
@@ -359,7 +394,7 @@ Arguments:
 
 ### Write vector
 
-`-wb <addr> <vector> [overwrite]`
+`-wv <addr> <vector> [overwrite]`
 
 Write given bytes vector or vector variable value to given memory address.
 Arguments:

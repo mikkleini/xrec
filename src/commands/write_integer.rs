@@ -21,6 +21,9 @@ pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context) -> Result<()>
             .unwrap_or(false)
         {
             args.required()?
+        } else if args.peek() == Some("-") {
+            args.advance();
+            "little".into()
         } else {
             "little".into()
         };
@@ -29,8 +32,8 @@ pub(crate) fn run(args: &mut Arguments<'_>, context: &mut Context) -> Result<()>
         let (bits, signed) = if bits_arg.eq_ignore_ascii_case("auto") {
             (
                 smallest_bits(
-                value,
-                value_text.starts_with('-') && !context.vars.contains_key(&value_text),
+                    value,
+                    value_text.starts_with('-') && !context.vars.contains_key(&value_text),
                 ),
                 value_text.starts_with('-') && !context.vars.contains_key(&value_text),
             )
